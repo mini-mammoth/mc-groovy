@@ -103,6 +103,17 @@ local function getSelectedPager()
         end
     end
 end
+
+local function getSelectedShuffle()
+    local xPageInfoStart = sizeX - 9 - string.len(pageCount) - string.len(pageNumber)
+    local xShuffleButtonStart = xPageInfoStart - 4 - string.len(shuffleText)
+
+    if touchedY >= 2 and touchedY <= 4 then
+        if touchedX >= xShuffleButtonStart and touchedX <= xShuffleButtonStart + string.len(shuffleText) + 2 then
+            return true
+        end
+    end
+end
  
 local function updateSongs(monitor, songFiles, maxFileNameLength, pageNumber, selectedIdx, songsPerRow, songsPerColumn)
     local sizeX, sizeY = monitor.getSize()
@@ -138,11 +149,26 @@ local function updateSongs(monitor, songFiles, maxFileNameLength, pageNumber, se
     monitor.setBackgroundColor(colors.black)
 end
 
-local function updatePager(monitor, pageNumber, pageCount)
-    local sizeX, sizeY = monitor.getSize()
-    
-    local xStart = sizeX - 9 - string.len(pageCount) - string.len(pageNumber)
-    
+local function updateHeader(monitor, pageNumber, pageCount)
+    local xPageInfoStart = sizeX - 9 - string.len(pageCount) - string.len(pageNumber)
+    local xShuffleButtonStart = xPageInfoStart - 4 - string.len(shuffleText)
+
+    -- draw shuffle button
+    if hasSelectedShuffle then
+        monitor.setBackgroundColor(colors.lime)
+    else
+        monitor.setBackgroundColor(colors.lightGray)
+    end
+
+    for i = 2, 4, 1 do
+        monitor.setCursorPos(xShuffleButtonStart, i)
+        monitor.write(string.rep(" ", string.len(shuffleText) + 2))
+    end
+
+    monitor.setCursorPos(xShuffleButtonStart + 1, 3)
+    monitor.write(shuffleText)
+
+    -- draw pagers
     monitor.setBackgroundColor(colors.lightGray)
 
     for i = 2, 4, 1 do
@@ -157,14 +183,15 @@ local function updatePager(monitor, pageNumber, pageCount)
     monitor.setCursorPos(sizeX - 2, 3)
     monitor.write(">")
 
+    -- draw pageInfo
     monitor.setBackgroundColor(colors.black)
-    monitor.setCursorPos(xStart, 3)
+    monitor.setCursorPos(xPageInfoStart, 3)
     monitor.write(""..pageNumber.."/"..pageCount)
 end
 
 local function updateMonitor()
     monitor.clear()
-    updatePager(monitor, pageNumber, pageCount)
+    updateHeader(monitor, pageNumber, pageCount)
     updateSongs(monitor, songFiles, maxFileNameLength, pageNumber, selectedIdx, songsPerRow, songsPerColumn)
 end
 
@@ -190,7 +217,18 @@ local function receiveTouchTask()
 end
 
 local function playSongTask()
-    nbs.play("music/"..selectedSong, modemSide, volume, true)
+    local selectedSong = songFiles[selectedIdx]
+    nbs.play("music/"..selectedSong, modemSide, volume, false)
+end
+
+local function playShuffle()
+    while true do
+        selectedIdx = math.random(1, numberOfSongs)
+        
+        updateMonitor()
+        playSongTask()
+        updateMonitor()
+    end
 end
  
 modemSide, monitorSide = ...
@@ -202,6 +240,8 @@ monitor = peripheral.wrap(monitorSide)
 monitor.setTextScale(1)
 monitor.clear()
 
+shuffleText = "Shuffle"
+
 maxFileNameLength = 16
 sizeX, sizeY = monitor.getSize()
 songsPerRow = math.floor(sizeX / (maxFileNameLength + 4))
@@ -209,10 +249,10 @@ songsPerColumn = math.floor((sizeY - 5) / 5)
 songsPerPage = songsPerRow * songsPerColumn
 
 selectedIdx = nil
-selectedSong = nil
 selectedPager = nil
+hasSelectedShuffle = nil
 
-local songFiles = getSongNames("music")
+songFiles = getSongNames("music")
 
 pageNumber = 1
 pageCount = nil
@@ -231,10 +271,10 @@ while true do
 
     selectedIdx = getSelectedIdx()
     selectedPager = getSelectedPager()
+    hasSelectedShuffle = getSelectedShuffle()
 
     if selectedIdx then
-        selectedSong = songFiles[selectedIdx]
-        if selectedSong then
+        if songFiles[selectedIdx] then
             updateMonitor()
             parallel.waitForAny(receiveTouchTask, playSongTask)
             selectedIdx = nil
@@ -248,5 +288,10 @@ while true do
             pageNumber = pageNumber + 1
             updateMonitor()
         end
+    elseif hasSelectedShuffle then
+        parallel.waitForAny(receiveTouchTask, playShuffle)
+        selectedIdx = nil
+        hasSelectedShuffle = nil
+        updateMonitor()
     end
 end
