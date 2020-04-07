@@ -1,0 +1,371 @@
+-- dump table to string
+function dump(o)
+  if type(o) == 'table' then
+     local s = '{ '
+     for k,v in pairs(o) do
+        if type(k) ~= 'number' then k = '"'..k..'"' end
+        s = s .. '['..k..'] = ' .. dump(v) .. ','
+     end
+     return s .. '} '
+  else
+     return tostring(o)
+  end
+end
+ 
+-- read byte from file
+local function readByte(file)
+  local char = file.read()
+ 
+  if char == nil then
+    return nil
+  end
+ 
+  return string.byte(char)
+end
+ 
+-- read short integer (16-bit) from file
+local function readShort(file)
+  local char1 = file.read()
+  local char2 = file.read()
+ 
+  if char1 == nil or char2 == nil then
+    return nil
+  end
+ 
+  return string.byte(char1) + string.byte(char2) * 256
+end
+ 
+-- read signed short integer (16-bit) from file
+local function readSignedShort(file)
+  local uShort = readShort(file)
+  local sShort = nil
+ 
+  if  (uShort % 2 == 0) then
+    sShort = uShort / 2
+  else
+    sShort = -1 * math.floor(uShort / 2)
+  end
+ 
+  return sShort
+end
+ 
+-- read integer (32-bit) from file
+local function readInt(file)
+  local char1 = file.read()
+  local char2 = file.read()
+  local char3 = file.read()
+  local char4 = file.read()
+ 
+  if char4 == nil or char3 == nil or char2 == nil or char1 == nil then
+    return nil
+  end
+ 
+  return string.byte(char1) + string.byte(char2) * 256 + string.byte(char3) * 65536 + string.byte(char4) * 16777216
+end
+ 
+-- read string from file
+local function readString(file)
+  local s = ""
+  local len = readInt(file)
+ 
+  for i = 1, len do
+    local c = file.read()
+    if not c then
+      break
+    end
+    s = s..c
+  end
+ 
+  return s
+end
+ 
+local function log(key, value, filePath)
+  return nil
+  --[[
+  local log = nil
+  if filePath == nil then
+    log = fs.open("log", "a")
+    log.writeLine(key..": "..tostring(value))
+    log.close()
+  else
+    log = fs.open(filePath, "a")
+    log.writeLine(key..": "..tostring(value))
+    log.close()
+  end
+  --]]
+end
+ 
+local function set(table, key, value)
+  table[key] = value
+ 
+  log(key, value)
+end
+ 
+-- read nbs file header
+local function readNBSHeader(file)
+  local header = {}
+ 
+  set(header, "isNewVersion", readShort(file) > 0)  
+  set(header, "nbsVersion", readByte(file))
+  set(header, "instrumentCount", readByte(file))
+  set(header, "lenght", readShort(file))
+  set(header, "layerCount", readShort(file))
+  set(header, "name", readString(file))
+ 
+  set(header, "author", readString(file))
+  set(header, "original_author", readString(file))
+  set(header, "description", readString(file))
+  set(header, "tempo", readShort(file) / 100)
+  set(header, "autosave", readByte(file))
+  set(header, "autosave_duration", readByte(file))
+  set(header, "time_signature", readByte(file))
+  set(header, "minutes_spent", readInt(file))
+  set(header, "left_clicks", readInt(file))
+  set(header, "right_clicks", readInt(file))
+  set(header, "blocks_added", readInt(file))
+  set(header, "blocks_removed", readInt(file))
+  set(header, "filename", readString(file))
+  set(header, "isLoop", readByte(file))
+  set(header, "maxLoopCount", readByte(file))
+  set(header, "loopStartTick", readShort(file))
+ 
+  return header
+end
+ 
+local function readNBSNoteBlocks(file)
+  local noteBlocks = {}
+ 
+  -- read first tick
+  local jumpsToNextTick = readShort(file)
+  log("jumpsToNextTick", jumpsToNextTick)
+  local currentTick = -1 + jumpsToNextTick
+ 
+  if jumpsToNextTick == 0 then
+    return noteBlocks
+  end
+ 
+  local tick = {}
+  tick.layers = {}
+  tick.jumpsToNextTick = jumpsToNextTick
+  local layer = {}
+ 
+  local jumpsToNextLayer = readShort(file)
+  log("jumpsToNextLayer", jumpsToNextLayer)
+  local currentLayer = -1 + jumpsToNextLayer
+ 
+  layer.instrument = readByte(file)
+  log("instrument", layer.instrument)
+  layer.noteKey = readByte(file)
+  log("noteKey", layer.noteKey)
+  layer.velocity = readByte(file)
+  log("velocity", layer.velocity)
+  layer.panning = readByte(file)
+  log("panning", layer.panning)
+  layer.pitch = readSignedShort(file)
+  log("pitch", layer.pitch)
+  
+  layer.currentLayer = currentLayer
+  table.insert(tick.layers, layer)
+ 
+  jumpsToNextLayer = readShort(file)
+  log("jumpsToNextLayer", jumpsToNextLayer)
+  log("currentLayer: ", currentLayer, "jumpLogs")
+ 
+  while jumpsToNextLayer > 0 do
+    layer = {}
+    currentLayer = currentLayer + jumpsToNextLayer
+ 
+    layer.instrument = readByte(file)
+    log("instrument", layer.instrument)
+    layer.noteKey = readByte(file)
+    log("noteKey", layer.noteKey)
+    layer.velocity = readByte(file)
+    log("velocity", layer.velocity)
+    layer.panning = readByte(file)
+    log("panning", layer.panning)
+    layer.pitch = readSignedShort(file)
+    log("pitch", layer.pitch)
+   
+    layer.currentLayer = currentLayer
+    table.insert(tick.layers, layer)
+    log("currentLayer: ", currentLayer, "jumpLogs")
+    jumpsToNextLayer = readShort(file)
+    log("jumpsToNextLayer", jumpsToNextLayer)
+  end
+ 
+  tick.currentTick = currentTick
+  table.insert(tick)
+  log("currentTick: ", currentTick, "jumpLogs")
+ 
+  jumpsToNextTick = readShort(file)
+  log("jumpsToNextTick", jumpsToNextTick)
+ 
+  if jumpsToNextTick > 0 then
+    jumpsToNextLayer = readShort(file)
+    log("jumpsToNextLayer", jumpsToNextLayer)
+  end
+ 
+  -- read next ticks
+  while jumpsToNextTick > 0 do
+    tick = {}
+    tick.layers = {}
+    tick.jumpsToNextTick = jumpsToNextTick
+   
+    currentTick = currentTick + jumpsToNextTick
+   
+    currentLayer = -1
+ 
+    while jumpsToNextLayer > 0 do
+      layer = {}
+      currentLayer = currentLayer + jumpsToNextLayer
+ 
+      layer.instrument = readByte(file)
+      log("instrument", layer.instrument)
+      layer.noteKey = readByte(file)
+      log("noteKey", layer.noteKey)
+      layer.velocity = readByte(file)
+      log("velocity", layer.velocity)
+      layer.panning = readByte(file)
+      log("panning", layer.panning)
+      layer.pitch = readSignedShort(file)
+      log("pitch", layer.pitch)
+     
+      layer.currentLayer = currentLayer
+      table.insert(tick.layers, layer)
+      log("currentLayer: ", currentLayer, "jumpLogs")
+      jumpsToNextLayer = readShort(file)
+      log("jumpsToNextLayer", jumpsToNextLayer)
+    end
+    
+    tick.currentTick = tick
+    table.insert(noteBlocks, tick)
+    log("currentTick: ", currentTick, "jumpLogs")
+
+    jumpsToNextTick = readShort(file)
+    log("jumpsToNextTick", jumpsToNextTick)
+    if jumpsToNextTick > 0 then
+      jumpsToNextLayer = readShort(file)
+      log("jumpsToNextLayer", jumpsToNextLayer)
+    end
+  end
+ 
+  return noteBlocks
+end
+ 
+local function readNBSLayers(file)
+  -- TODO
+  return nil
+end
+ 
+local function readNBSCustomInstruments(file)
+  -- TODO
+  return nil
+end
+ 
+local function loadSong(filePath, isVerbose)
+  log("...Start Loading Song...")
+  local file = fs.open(filePath, "r")
+ 
+  if file then
+    local song = {}
+ 
+    if isVerbose then
+      print("Reading header...")
+    end
+    song.header = readNBSHeader(file)
+   
+    if isVerbose then
+      print("Reading note blocks...")
+    end
+    song.noteBlocks = readNBSNoteBlocks(file)
+ 
+    if isVerbose then
+      print("Reading layers...")
+    end
+    song.layers = readNBSLayers(file)
+ 
+    if isVerbose then
+      print("Reading custom instruments...")
+    end
+    song.customInstruments = readNBSCustomInstruments(file)
+ 
+    file.close()
+    print("Return loaded song...")
+    return song
+  end
+  log("...End Loading Song...")
+  return nil
+end
+ 
+local function getInstrumentById(id)
+  if id == 0 then
+    return "harp"
+  elseif id == 1 then
+    return "bass"
+  elseif id == 2 then
+    return "basedrum"
+  elseif id == 3 then
+    return "snare"
+  elseif id == 4 then
+    return "hat"
+  elseif id == 5 then
+    return "guitar"
+  elseif id == 6 then
+    return "flute"
+  elseif id == 7 then
+    return "bell"
+  elseif id == 8 then
+    return "chime"
+  elseif id == 9 then
+    return "xylophone"
+  elseif id == 10 then
+    return "iron_xylophone"
+  elseif id == 11 then
+    return "cow_bell"
+  elseif id == 12 then
+    return "didgeridoo"
+  elseif id == 13 then
+    return "bit"
+  elseif id == 14 then
+    return "banjo"
+  elseif id == 15 then
+    return "pling"
+  else
+    return nil
+  end
+end
+ 
+local function playSong(song, modemSide, volume)
+  print("Start playing song")
+  log("...Start playing song...", nil, "playLog")
+ 
+  rednet.broadcast("groovy_stop")
+  sleep(0.5)
+  rednet.broadcast("groovy_start")
+ 
+  local tempo = song.header["tempo"]
+  log("tempo", tempo, "playLog")
+  local secondsPerTick = 1/tempo
+ 
+  local jumpsToNextTick = 0
+  for tickIndex, tick in ipairs(song.noteBlocks) do
+    jumpsToNextTick = tick.jumpsToNextTick
+    log("tickIndex", tickIndex, "playLog")
+    sleep(jumpsToNextTick * secondsPerTick)
+    rednetMsg = "groovy_play,"
+      for layerIndex, layer in ipairs(tick.layers) do
+        log("layerIndex", layerIndex, "playLog")
+        log("instrument", getInstrumentById(layer.instrument), "playLog")
+        rednetMsg = rednetMsg..getInstrumentById(layer.instrument)..","..volume..","..(layer.noteKey - 33)..","
+      end
+      rednetMsg = string.sub(rednetMsg, 1, string.len(rednetMsg) - 1)
+    rednet.broadcast(rednetMsg)
+  end
+  log("...End playing song...", nil, "playLog")
+  print("End playing song")
+end
+ 
+function play(filePath, modemSide, volume, isVerbose)
+  local song = loadSong(filePath, isVerbose)
+  playSong(song, side, tonumber(volume))
+end
