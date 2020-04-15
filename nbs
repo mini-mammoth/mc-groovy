@@ -262,7 +262,7 @@ local function readNBSCustomInstruments(file)
   return nil
 end
  
-local function loadSong(filePath, isVerbose)
+function loadSong(filePath, isVerbose)
   log("...Start Loading Song...")
   local file = fs.open(filePath, "r")
  
@@ -297,7 +297,7 @@ local function loadSong(filePath, isVerbose)
   return nil
 end
  
-local function getInstrumentById(id)
+function getInstrumentById(id)
   if id == 0 then
     return "harp"
   elseif id == 1 then
@@ -333,39 +333,4 @@ local function getInstrumentById(id)
   else
     return nil
   end
-end
- 
-local function playSong(song, modemSide, volume)
-  print("Start playing song")
-  log("...Start playing song...", nil, "playLog")
- 
-  rednet.broadcast("groovy_stop")
-  sleep(0.5)
-  rednet.broadcast("groovy_start")
- 
-  local tempo = song.header["tempo"]
-  log("tempo", tempo, "playLog")
-  local secondsPerTick = 1/tempo
- 
-  local jumpsToNextTick = 0
-  for tickIndex, tick in ipairs(song.noteBlocks) do
-    jumpsToNextTick = tick.jumpsToNextTick
-    log("tickIndex", tickIndex, "playLog")
-    sleep(jumpsToNextTick * secondsPerTick)
-    rednetMsg = "groovy_play,"
-      for layerIndex, layer in ipairs(tick.layers) do
-        log("layerIndex", layerIndex, "playLog")
-        log("instrument", getInstrumentById(layer.instrument), "playLog")
-        rednetMsg = rednetMsg..getInstrumentById(layer.instrument)..","..volume..","..(layer.noteKey - 33)..","
-      end
-      rednetMsg = string.sub(rednetMsg, 1, string.len(rednetMsg) - 1)
-    rednet.broadcast(rednetMsg)
-  end
-  log("...End playing song...", nil, "playLog")
-  print("End playing song")
-end
- 
-function play(filePath, modemSide, volume, isVerbose)
-  local song = loadSong(filePath, isVerbose)
-  playSong(song, side, tonumber(volume))
 end

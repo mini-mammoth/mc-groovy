@@ -93,13 +93,23 @@ local function getSelectedIdx()
 end
 
 local function getSelectedPager()
-    local sizeX, sizeY = monitor.getSize()
-
     if touchedY >= 2 and touchedY <= 4 then
         if touchedX >= sizeX - 7 and touchedX <= sizeX - 5 then
             return "prev_page"
         elseif touchedX >= sizeX - 4 and touchedX <= sizeX - 2 then 
             return "next_page"
+        end
+    end
+end
+
+local function getSelectedVolume()
+    local xVolumeStart = sizeX - 25 - string.len(pageCount) - string.len(pageNumber) - string.len(shuffleText)
+
+    if touchedY >= 2 and touchedY <= 4 then
+        if touchedX >= xVolumeStart and touchedX <= xVolumeStart + 2 then
+            return -1
+        elseif touchedX >= xVolumeStart + 8 and touchedX <= xVolumeStart + 10 then 
+            return 1
         end
     end
 end
@@ -152,6 +162,31 @@ end
 local function updateHeader(monitor, pageNumber, pageCount)
     local xPageInfoStart = sizeX - 9 - string.len(pageCount) - string.len(pageNumber)
     local xShuffleButtonStart = xPageInfoStart - 4 - string.len(shuffleText)
+    local xVolumeStart = xShuffleButtonStart - 12
+
+    -- draw volume
+    monitor.setBackgroundColor(colors.lightGray)
+
+    for i = 2, 4, 1 do
+        monitor.setCursorPos(xVolumeStart, i)
+        monitor.write("   ")
+    end
+    monitor.setCursorPos(xVolumeStart + 1, 3)
+    monitor.write("-")
+
+    for i = 2, 4, 1 do
+        monitor.setCursorPos(xVolumeStart + 8, i)
+        monitor.write("   ")
+    end
+    monitor.setCursorPos(xVolumeStart + 9, 3)
+    monitor.write("+")
+
+    monitor.setBackgroundColor(colors.black)
+
+    monitor.setCursorPos(xVolumeStart + 4, 3)
+    for i = 1, volume, 1 do
+        monitor.write(string.char(15))
+    end
 
     -- draw shuffle button
     if hasSelectedShuffle then
@@ -201,6 +236,7 @@ local function receiveTouchTask()
         event, par1, touchedX, touchedY = os.pullEvent("monitor_touch")
 
         selectedPager = getSelectedPager()
+        selectedVolume = getSelectedVolume()
 
         if selectedPager then
             if selectedPager == "prev_page" and pageNumber > 1 then
@@ -210,15 +246,51 @@ local function receiveTouchTask()
                 pageNumber = pageNumber + 1
                 updateMonitor()
             end
+        elseif selectedVolume then
+            if volume >= 2 and selectedVolume == -1 then 
+                volume = volume + selectedVolume
+            elseif volume <= 2 and selectedVolume == 1 then
+                volume = volume + selectedVolume
+            end
+            updateMonitor()
         else
             shouldRun = false
         end
     end
 end
 
+local function playSong(song, modemSide)
+    print("Start playing song")
+   
+    rednet.broadcast("groovy_stop")
+    sleep(0.5)
+    rednet.broadcast("groovy_start")
+   
+    local tempo = song.header["tempo"]
+    local secondsPerTick = 1/tempo
+   
+    local jumpsToNextTick = 0
+    for tickIndex, tick in ipairs(song.noteBlocks) do
+      jumpsToNextTick = tick.jumpsToNextTick
+      sleep(jumpsToNextTick * secondsPerTick)
+      rednetMsg = "groovy_play,"
+        for layerIndex, layer in ipairs(tick.layers) do
+          rednetMsg = rednetMsg..nbs.getInstrumentById(layer.instrument)..","..volume..","..(layer.noteKey - 33)..","
+        end
+        rednetMsg = string.sub(rednetMsg, 1, string.len(rednetMsg) - 1)
+      rednet.broadcast(rednetMsg)
+    end
+    print("End playing song")
+  end
+   
+local function play(filePath, modemSide, isVerbose)
+    local song = nbs.loadSong(filePath, isVerbose)
+    playSong(song, side)
+end
+
 local function playSongTask()
     local selectedSong = songFiles[selectedIdx]
-    nbs.play("music/"..selectedSong, modemSide, volume, false)
+    play("music/"..selectedSong, modemSide, false)
 end
 
 local function playShuffle()
@@ -234,7 +306,7 @@ end
 modemSide, monitorSide = ...
  
 rednet.open(modemSide)
-volume = 3
+volume = 1
 
 monitor = peripheral.wrap(monitorSide)
 monitor.setTextScale(1)
@@ -272,6 +344,7 @@ while true do
     selectedIdx = getSelectedIdx()
     selectedPager = getSelectedPager()
     hasSelectedShuffle = getSelectedShuffle()
+    selectedVolume = getSelectedVolume()
 
     if selectedIdx then
         if songFiles[selectedIdx] then
@@ -288,6 +361,13 @@ while true do
             pageNumber = pageNumber + 1
             updateMonitor()
         end
+    elseif selectedVolume then
+        if volume >= 2 and selectedVolume == -1 then 
+            volume = volume + selectedVolume
+        elseif volume <= 2 and selectedVolume == 1 then
+            volume = volume + selectedVolume
+        end
+        updateMonitor()
     elseif hasSelectedShuffle then
         parallel.waitForAny(receiveTouchTask, playShuffle)
         selectedIdx = nil
